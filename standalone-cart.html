@@ -1,0 +1,467 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GATACA Cart Redesign</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  /* ---------- Tokens (mirrors the live theme: Poppins, black buttons, red accent) ---------- */
+  :root{
+    --bg:#fff; --bg-soft:#f7f7f7; --bg-field:#f5f5f5;
+    --fg:#000; --fg-muted:#666; --fg-subtle:#8a8a8a;
+    --border:#e6e6e6; --border-strong:#cfcfcf;
+    --accent:#d63a2f;            /* theme --color-primary / sale price */
+    --success:#1f7a4d; --success-bg:#eaf6ef;
+    --upsell-bg:#fff8f0; --upsell-border:#f3d9bf;
+    --radius:12px; --radius-sm:8px;
+    --shadow-drawer:-12px 0 40px rgba(0,0,0,.12);
+    --ease:cubic-bezier(.2,.8,.2,1);
+  }
+  *{box-sizing:border-box}
+  [hidden]{display:none!important}
+  html,body{margin:0}
+  body{font-family:Poppins,system-ui,sans-serif;color:var(--fg);background:var(--bg);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
+  button{font:inherit;color:inherit;cursor:pointer}
+  img{display:block;max-width:100%}
+  .sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+  :focus-visible{outline:2px solid var(--fg);outline-offset:2px}
+
+  /* ---------- Demo PDP (only here to trigger Add to Cart) ---------- */
+  .demo-note{background:var(--fg);color:#fff;font-size:12px;text-align:center;padding:8px 16px}
+  .pdp{max-width:1080px;margin:0 auto;padding:32px 16px 80px;display:grid;gap:32px}
+  @media(min-width:860px){.pdp{grid-template-columns:1fr 1fr;align-items:start;padding-top:48px}}
+  .pdp__media{background:var(--bg-soft);border-radius:var(--radius);aspect-ratio:1;overflow:hidden}
+  .pdp__media img{width:100%;height:100%;object-fit:cover}
+  .pdp h1{font-size:26px;line-height:1.25;font-weight:600;margin:0 0 8px}
+  .pdp__sub{color:var(--fg-muted);margin:0 0 20px}
+  .packs{display:grid;gap:10px;margin:0 0 20px;border:0;padding:0}
+  .packs legend{font-weight:600;margin-bottom:10px}
+  .pack{display:flex;align-items:center;gap:12px;border:1.5px solid var(--border);border-radius:var(--radius-sm);padding:14px 16px;cursor:pointer;transition:border-color .15s}
+  .pack:has(input:checked){border-color:var(--fg);background:var(--bg-soft)}
+  .pack input{accent-color:#000;width:18px;height:18px;margin:0}
+  .pack__name{font-weight:600}
+  .pack__meta{color:var(--fg-muted);font-size:12px}
+  .pack__price{margin-left:auto;text-align:right}
+  .pack__price s{color:var(--fg-subtle);font-size:12px;display:block}
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;border:0;border-radius:var(--radius-sm);font-weight:600;transition:transform .15s var(--ease),background .15s}
+  .btn--primary{background:var(--fg);color:#fff;min-height:52px;padding:0 24px;font-size:16px;width:100%}
+  .btn--primary:hover{background:#222}
+  .btn--primary:active{transform:scale(.99)}
+
+  /* ---------- Cart drawer ---------- */
+  .overlay{position:fixed;inset:0;background:rgba(20,20,20,.45);opacity:0;visibility:hidden;transition:opacity .3s var(--ease),visibility .3s;z-index:40}
+  .drawer{position:fixed;top:0;right:0;height:100%;height:100dvh;width:100%;max-width:440px;background:var(--bg);box-shadow:var(--shadow-drawer);transform:translateX(100%);transition:transform .38s var(--ease);z-index:41;display:flex;flex-direction:column}
+  body.cart-open .overlay{opacity:1;visibility:visible}
+  body.cart-open .drawer{transform:none}
+  body.cart-open{overflow:hidden}
+
+  .drawer__header{padding:18px 20px 14px;border-bottom:1px solid var(--border)}
+  .drawer__title-row{display:flex;align-items:center;justify-content:space-between}
+  .drawer__title{font-size:18px;font-weight:600;margin:0;display:flex;align-items:center;gap:8px}
+  .count-pill{background:var(--fg);color:#fff;font-size:11px;font-weight:600;border-radius:999px;min-width:22px;height:22px;padding:0 7px;display:inline-grid;place-items:center}
+  .icon-btn{background:none;border:0;width:40px;height:40px;border-radius:50%;display:grid;place-items:center;margin-right:-10px}
+  .icon-btn:hover{background:var(--bg-soft)}
+
+  /* Added-to-cart confirmation (replaces the popup's "you did something" moment) */
+  .added{display:flex;align-items:center;gap:10px;background:var(--success-bg);color:var(--success);border-radius:var(--radius-sm);padding:10px 12px;font-size:13px;font-weight:500;margin-top:12px;overflow:hidden;max-height:0;opacity:0;padding-block:0;transition:max-height .35s var(--ease),opacity .25s,padding .35s var(--ease)}
+  .added.is-visible{max-height:60px;opacity:1;padding-block:10px}
+  .added svg{flex:none}
+
+  /* Milestone progress */
+  .milestones{margin-top:14px}
+  .milestones__msg{font-size:13px;margin:0 0 10px;font-weight:500}
+  .milestones__msg strong{color:var(--accent);font-weight:600}
+  .track{position:relative;height:6px;background:var(--bg-field);border-radius:999px;margin:0 6px 26px}
+  .track__fill{position:absolute;inset:0 auto 0 0;width:0;background:var(--fg);border-radius:inherit;transition:width .6s var(--ease)}
+  .stop{position:absolute;top:50%;transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center}
+  .stop__dot{width:16px;height:16px;border-radius:50%;background:#fff;border:2px solid var(--border-strong);display:grid;place-items:center;transition:all .3s}
+  .stop.is-done .stop__dot{background:var(--fg);border-color:var(--fg)}
+  .stop__dot svg{opacity:0;transition:opacity .2s}
+  .stop.is-done .stop__dot svg{opacity:1}
+  .stop__label{position:absolute;top:18px;white-space:nowrap;font-size:10.5px;font-weight:600;letter-spacing:.02em;color:var(--fg-subtle);text-transform:uppercase}
+  .stop.is-done .stop__label{color:var(--fg)}
+  .stop:last-child .stop__label{right:-6px}
+
+  .drawer__body{flex:1;overflow-y:auto;padding:16px 20px 20px;display:flex;flex-direction:column;gap:16px;overscroll-behavior:contain}
+
+  /* Line item */
+  .line{display:grid;grid-template-columns:76px 1fr;gap:14px;transition:opacity .25s}
+  .line__img{width:76px;height:76px;border-radius:var(--radius-sm);background:var(--bg-soft);overflow:hidden}
+  .line__img img{width:100%;height:100%;object-fit:cover}
+  .line__top{display:flex;justify-content:space-between;gap:8px}
+  .line__title{font-weight:600;font-size:14px;line-height:1.35;margin:0}
+  .line__variant{color:var(--fg-muted);font-size:12.5px;margin:2px 0 0;display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px}
+  .tag{display:inline-block;font-size:10.5px;font-weight:600;border-radius:4px;padding:1px 6px;background:var(--success-bg);color:var(--success)}
+  .line__bottom{display:flex;align-items:center;justify-content:space-between;margin-top:10px}
+  .qty{display:inline-flex;align-items:center;border:1px solid var(--border);border-radius:999px;height:34px}
+  .qty button{width:34px;height:32px;border:0;background:none;font-size:16px;border-radius:999px}
+  .qty button:hover{background:var(--bg-soft)}
+  .qty span{min-width:22px;text-align:center;font-weight:500;font-size:13px}
+  .price{text-align:right;line-height:1.25}
+  .price b{font-weight:600}
+  .price s{display:block;color:var(--fg-subtle);font-size:12px}
+  .remove{background:none;border:0;color:var(--fg-subtle);padding:2px;height:24px}
+  .remove:hover{color:var(--fg)}
+
+  /* Inline pack upgrade (replaces the blocking popup) */
+  .upsell{border:1.5px solid var(--upsell-border);background:var(--upsell-bg);border-radius:var(--radius);padding:14px;position:relative;animation:rise .4s var(--ease) both}
+  @keyframes rise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+  .upsell__badge{position:absolute;top:-10px;left:14px;background:var(--accent);color:#fff;font-size:10.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;border-radius:999px;padding:3px 10px}
+  .upsell__head{display:flex;gap:12px;align-items:flex-start;margin-top:4px}
+  .upsell__thumb{position:relative;width:52px;height:52px;flex:none}
+  .upsell__thumb img{width:40px;height:40px;border-radius:6px;object-fit:cover;position:absolute;background:#fff;border:1px solid var(--border)}
+  .upsell__thumb img:first-child{top:0;left:0}
+  .upsell__thumb img:last-child{bottom:0;right:0}
+  .upsell__title{font-weight:600;font-size:14.5px;margin:0;line-height:1.35}
+  .upsell__proof{font-size:12.5px;color:var(--fg-muted);margin:3px 0 0}
+  .upsell__proof b{color:var(--fg);font-weight:600}
+  .upsell__perks{list-style:none;margin:12px 0;padding:0;display:grid;gap:6px;font-size:12.5px}
+  .upsell__perks li{display:flex;gap:8px;align-items:center}
+  .upsell__perks svg{flex:none;color:var(--success)}
+  .upsell__cta{display:flex;align-items:center;gap:12px}
+  .btn--upgrade{flex:1;background:var(--fg);color:#fff;min-height:44px;padding:0 14px;font-size:14px}
+  .btn--upgrade:hover{background:#222}
+  .btn--upgrade small{font-weight:400;opacity:.8}
+  .link-btn{background:none;border:0;padding:6px 2px;color:var(--fg-muted);font-size:12.5px;text-decoration:underline;text-underline-offset:3px}
+  .link-btn:hover{color:var(--fg)}
+
+  .upsell-mini{display:flex;align-items:center;gap:12px;border:1.5px dashed var(--upsell-border);background:var(--upsell-bg);border-radius:var(--radius);padding:10px 12px;animation:rise .3s var(--ease) both}
+  .upsell-mini p{margin:0;flex:1;font-size:13px;line-height:1.35}
+  .upsell-mini p span{color:var(--fg-muted);font-size:12px}
+  .upsell__thumb--sm{width:40px;height:40px}
+  .upsell__thumb--sm img{width:30px!important;height:30px!important}
+  .btn--mini{background:var(--fg);color:#fff;min-height:36px;padding:0 12px;font-size:12.5px;white-space:nowrap}
+  .btn--mini:hover{background:#222}
+  .upgraded{display:flex;gap:8px;align-items:center;font-size:12.5px;color:var(--success);background:var(--success-bg);border-radius:var(--radius-sm);padding:8px 12px;animation:rise .35s var(--ease) both}
+
+  /* Delivery estimate + trust */
+  .eta{display:flex;gap:12px;align-items:center;background:var(--bg-soft);border-radius:var(--radius);padding:12px 14px}
+  .eta svg{flex:none}
+  .eta p{margin:0;font-size:13px;line-height:1.4}
+  .eta strong{font-weight:600}
+  .eta span{color:var(--fg-muted);font-size:12px}
+
+  .trust{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+  .trust__item{border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 8px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:6px}
+  .trust__item svg{width:22px;height:22px}
+  .trust__item b{font-size:12px;font-weight:600;line-height:1.25}
+  .trust__item span{font-size:11px;color:var(--fg-muted);line-height:1.3}
+
+  .empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:12px;padding:40px 20px;color:var(--fg-muted)}
+  .empty h3{color:var(--fg);margin:0;font-size:17px;font-weight:600}
+
+  /* Footer */
+  .drawer__footer{border-top:1px solid var(--border);padding:14px 20px calc(16px + env(safe-area-inset-bottom));display:grid;gap:10px;background:var(--bg)}
+  .row{display:flex;justify-content:space-between;align-items:baseline;font-size:13px}
+  .row--save{color:var(--success);font-weight:500}
+  .row--total{font-size:16px;font-weight:600}
+  .btn--checkout{position:relative;background:var(--fg);color:#fff;min-height:54px;width:100%;font-size:16px;letter-spacing:.02em;flex-direction:column;gap:0;line-height:1.2}
+  .btn--checkout:hover{background:#222}
+  .btn--checkout small{font-size:11px;font-weight:400;opacity:.8;letter-spacing:0}
+  .btn--checkout .lock{position:absolute;left:16px;top:50%;transform:translateY(-50%)}
+  .footer-note{margin:0;font-size:11.5px;color:var(--fg-muted);text-align:center}
+  .footer-note a{color:inherit}
+
+  @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+
+<div class="demo-note">Prototype: pick a pack and click Add to cart to see the new cart. There's no popup any more.</div>
+
+<!-- ============ Demo PDP (stand-in for the real product form) ============ -->
+<main class="pdp">
+  <div class="pdp__media"><img src="assets/berberine-bottle.jpg" alt="BioSolve Berberine bottle"></div>
+  <div>
+    <h1>BioSolve Berberine</h1>
+    <p class="pdp__sub">Next-gen Berberine · 5-in-1 Synergistic Blend</p>
+    <fieldset class="packs" id="packs">
+      <legend>Choose your pack</legend>
+      <label class="pack"><input type="radio" name="pack" value="p1" checked><div><div class="pack__name">Pack of 1</div><div class="pack__meta">1-month supply</div></div><div class="pack__price"><b>₹1,499</b><s>₹1,800</s></div></label>
+      <label class="pack"><input type="radio" name="pack" value="p2"><div><div class="pack__name">Pack of 2</div><div class="pack__meta">2-month supply</div></div><div class="pack__price"><b>₹2,699</b><s>₹3,600</s></div></label>
+      <label class="pack"><input type="radio" name="pack" value="p3"><div><div class="pack__name">Pack of 3</div><div class="pack__meta">3-month supply</div></div><div class="pack__price"><b>₹3,999</b><s>₹5,400</s></div></label>
+    </fieldset>
+    <button class="btn btn--primary" id="atc" type="button">Add to cart</button>
+  </div>
+</main>
+
+<!-- ============ Cart drawer ============ -->
+<div class="overlay" data-close></div>
+<aside class="drawer" id="cart" role="dialog" aria-modal="true" aria-labelledby="cart-title" aria-hidden="true">
+  <header class="drawer__header">
+    <div class="drawer__title-row">
+      <h2 class="drawer__title" id="cart-title">Your cart <span class="count-pill" id="count">0</span></h2>
+      <button class="icon-btn" type="button" data-close aria-label="Close cart">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+
+    <div class="added" id="added" role="status" aria-live="polite">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m8 12 3 3 5-6"/></svg>
+      <span id="added-text">Added to cart</span>
+    </div>
+
+    <div class="milestones" id="milestones">
+      <p class="milestones__msg" id="ms-msg"></p>
+      <div class="track" aria-hidden="true">
+        <div class="track__fill" id="ms-fill"></div>
+        <div class="stop" style="left:33.33%" data-at="1500"><div class="stop__dot"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="4"><path d="m5 12 5 5 9-10"/></svg></div><span class="stop__label">Free shipping</span></div>
+        <div class="stop" style="left:66.66%" data-at="2500"><div class="stop__dot"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="4"><path d="m5 12 5 5 9-10"/></svg></div><span class="stop__label">15% off</span></div>
+        <div class="stop" style="left:100%" data-at="4500"><div class="stop__dot"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="4"><path d="m5 12 5 5 9-10"/></svg></div><span class="stop__label">20% off</span></div>
+      </div>
+    </div>
+  </header>
+
+  <div class="drawer__body" id="body"></div>
+
+  <footer class="drawer__footer" id="footer">
+    <div class="row row--save" id="save-row"><span>You're saving</span><span id="save"></span></div>
+    <div class="row row--total"><span>Estimated total</span><span id="total">₹0</span></div>
+    <button class="btn btn--checkout" type="button">
+      <svg class="lock" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+      Checkout
+      <small>Pay with UPI · Paytm · PhonePe · GPay</small>
+    </button>
+    <p class="footer-note">Tax included. Shipping &amp; discounts calculated at checkout. <a href="https://gataca.in/policies/shipping-policy">Shipping policy</a></p>
+  </footer>
+</aside>
+
+<script>
+(() => {
+  // Variant data mirrors the theme's #pack-upsell-variants JSON (prices in paise).
+  const VARIANTS = {
+    p1:{id:54028117803313,title:'Pack of 1',supply:'1-month supply',price:149900,mrp:180000},
+    p2:{id:54028117836081,title:'Pack of 2',supply:'2-month supply',price:269900,mrp:360000},
+    p3:{id:54028117868849,title:'Pack of 3',supply:'3-month supply',price:399900,mrp:540000},
+  };
+  const PRODUCT = 'BioSolve Berberine';
+  const IMG = 'assets/berberine-bottle.jpg';
+  const MILESTONES = [150000, 250000, 450000];
+
+  const state = { lines: [], upsellDismissed: false, justUpgraded: false };
+
+  const $ = (s, r=document) => r.querySelector(s);
+  const inr = p => '₹' + Math.round(p/100).toLocaleString('en-IN');
+  const track = (name, params) => { if (typeof gtag !== 'undefined') gtag('event', name, params); };
+
+  // ---------- Delivery estimate: 1–2 business days dispatch + 5–7 standard transit ----------
+  function addBusinessDays(date, n){
+    const d = new Date(date);
+    while(n > 0){ d.setDate(d.getDate()+1); const w = d.getDay(); if (w !== 0 && w !== 6) n--; }
+    return d;
+  }
+  const fmt = d => d.toLocaleDateString('en-IN',{weekday:'short',day:'numeric',month:'short'});
+  const etaFrom = addBusinessDays(new Date(), 1+5), etaTo = addBusinessDays(new Date(), 2+7);
+
+  // ---------- Cart ops ----------
+  function add(key, qty=1){
+    const line = state.lines.find(l => l.key === key);
+    line ? line.qty += qty : state.lines.push({key, qty});
+  }
+  function setQty(key, qty){
+    if (qty <= 0) state.lines = state.lines.filter(l => l.key !== key);
+    else state.lines.find(l => l.key === key).qty = qty;
+    render();
+  }
+  function upgrade(){
+    // Swap the Pack of 1 line for Pack of 2 (same qty). On Shopify this is /cart/change.js + /cart/add.js.
+    const l1 = state.lines.find(l => l.key === 'p1');
+    if (!l1) return;
+    const qty = l1.qty;
+    state.lines = state.lines.filter(l => l.key !== 'p1');
+    add('p2', qty);
+    state.justUpgraded = true;
+    track('pack2_add_to_cart',{event_category:'ecommerce',event_label:'Cart upgrade to Pack 2',action:'accepted_upsell',pack_selected:'pack_2',placement:'cart_drawer'});
+    render();
+    flashAdded(`Upgraded to ${VARIANTS.p2.title}`);
+  }
+
+  const totals = () => state.lines.reduce((t,l) => {
+    const v = VARIANTS[l.key]; t.price += v.price*l.qty; t.mrp += v.mrp*l.qty; t.count += l.qty; return t;
+  }, {price:0, mrp:0, count:0});
+
+  // ---------- Render ----------
+  const check = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>';
+
+  function lineHTML(l){
+    const v = VARIANTS[l.key];
+    return `
+      <div class="line" data-key="${l.key}">
+        <div class="line__img"><img src="${IMG}" alt=""></div>
+        <div>
+          <div class="line__top">
+            <div>
+              <p class="line__title">${PRODUCT}</p>
+              <p class="line__variant">${v.title} · ${v.supply}${l.key!=='p1' ? ' <span class="tag">Best results</span>' : ''}</p>
+            </div>
+            <button class="remove" type="button" data-remove="${l.key}" aria-label="Remove ${v.title}">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M10 11v6M14 11v6M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/></svg>
+            </button>
+          </div>
+          <div class="line__bottom">
+            <div class="qty" role="group" aria-label="Quantity">
+              <button type="button" data-dec="${l.key}" aria-label="Decrease quantity">−</button>
+              <span>${l.qty}</span>
+              <button type="button" data-inc="${l.key}" aria-label="Increase quantity">+</button>
+            </div>
+            <div class="price"><b>${inr(v.price*l.qty)}</b><s>${inr(v.mrp*l.qty)}</s></div>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  function upsellHTML(qty){
+    const p1 = VARIANTS.p1, p2 = VARIANTS.p2;
+    const extra = (p2.price - p1.price) * qty;
+    const vsSingles = (p1.price*2 - p2.price) * qty;
+    return `
+      <section class="upsell" aria-label="Upgrade suggestion">
+        <span class="upsell__badge">Most chosen</span>
+        <div class="upsell__head">
+          <div class="upsell__thumb"><img src="${IMG}" alt=""><img src="${IMG}" alt=""></div>
+          <div>
+            <p class="upsell__title">Switch to Pack of 2 for better results</p>
+            <p class="upsell__proof"><b>83% of our users</b> reported better results after 2 months of regular use.</p>
+          </div>
+        </div>
+        <ul class="upsell__perks">
+          <li>${check} Full 2-month course, ${inr(p2.price/2)} per bottle</li>
+          <li>${check} Save ${inr(vsSingles)} vs buying 2 single packs</li>
+          <li>${check} Unlocks free shipping on this order</li>
+        </ul>
+        <div class="upsell__cta">
+          <button class="btn btn--upgrade" type="button" data-upgrade>Upgrade to Pack of 2&nbsp;<small>+${inr(extra)}</small></button>
+        </div>
+      </section>`;
+  }
+
+  function upsellMiniHTML(qty){
+    const extra = (VARIANTS.p2.price - VARIANTS.p1.price) * qty;
+    return `
+      <section class="upsell-mini" aria-label="Upgrade suggestion">
+        <div class="upsell__thumb upsell__thumb--sm"><img src="${IMG}" alt=""><img src="${IMG}" alt=""></div>
+        <p><b>Pack of 2</b> for better results<br><span>Save ${inr((VARIANTS.p1.price*2 - VARIANTS.p2.price)*qty)} · free shipping</span></p>
+        <button class="btn btn--mini" type="button" data-upgrade>Upgrade +${inr(extra)}</button>
+      </section>`;
+  }
+
+  function trustHTML(){
+    return `
+      <div class="eta">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h11v9H3zM14 10h4l3 3v3h-7"/><circle cx="7" cy="17.5" r="1.8"/><circle cx="17" cy="17.5" r="1.8"/></svg>
+        <p><strong>Estimated delivery: ${fmt(etaFrom)} – ${fmt(etaTo)}</strong><br><span>Ships in 1–2 business days. Tracking link sent by email.</span></p>
+      </div>
+      <div class="trust" role="list">
+        <div class="trust__item" role="listitem">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="m3 8 9 5 9-5M12 13v8"/></svg>
+          <b>Free shipping</b><span>On orders over ₹1,500</span>
+        </div>
+        <div class="trust__item" role="listitem">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>
+          <b>30-day returns</b><span><a href="https://gataca.in/policies/refund-policy" style="color:inherit">See refund policy</a></span>
+        </div>
+        <div class="trust__item" role="listitem">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 4 6v6c0 4.5 3.4 8.3 8 9 4.6-.7 8-4.5 8-9V6z"/><path d="m9 12 2 2 4-4"/></svg>
+          <b>Secure checkout</b><span>Encrypted payments</span>
+        </div>
+      </div>`;
+  }
+
+  function renderMilestones(total){
+    const [m1,m2,m3] = MILESTONES;
+    let pct, msg;
+    if (total >= m3){ pct = 100; msg = `<strong>You've unlocked 20% off 🎉</strong>`; }
+    else if (total >= m2){ pct = 66.66 + (total-m2)/(m3-m2)*33.33; msg = `<strong>15% off unlocked.</strong> Add ${inr(m3-total)} more for 20% off`; }
+    else if (total >= m1){ pct = 33.33 + (total-m1)/(m2-m1)*33.33; msg = `<strong>Free shipping unlocked.</strong> Add ${inr(m2-total)} more for 15% off`; }
+    else { pct = total/m1*33.33; msg = `You're <strong>${inr(m1-total)}</strong> away from free shipping`; }
+    $('#ms-fill').style.width = Math.min(pct,100) + '%';
+    $('#ms-msg').innerHTML = msg;
+    document.querySelectorAll('.stop').forEach(s => s.classList.toggle('is-done', total >= +s.dataset.at*100));
+  }
+
+  function render(){
+    const t = totals();
+    $('#count').textContent = t.count;
+    $('#milestones').hidden = t.count === 0;
+    $('#footer').hidden = t.count === 0;
+    renderMilestones(t.price);
+
+    const body = $('#body');
+    if (!t.count){
+      body.innerHTML = `<div class="empty"><h3>Your cart is empty</h3><p>Pick a pack to get started.</p></div>`;
+      return;
+    }
+    const hasMulti = state.lines.some(l => l.key !== 'p1');
+    const p1 = state.lines.find(l => l.key === 'p1');
+    let html = '';
+    state.lines.forEach(l => {
+      html += lineHTML(l);
+      // Inline upsell sits directly under the Pack of 1 line, only when no bigger pack is already in the cart.
+      // The full Pack of 2 card always shows under Pack of 1 until a bigger pack is in the cart.
+      if (l.key === 'p1' && !hasMulti) html += upsellHTML(l.qty);
+    });
+    if (state.justUpgraded && !p1){
+      html += `<div class="upgraded">${check} Nice choice. You're set for the full 2-month course.</div>`;
+    }
+    html += trustHTML();
+    body.innerHTML = html;
+
+    const save = t.mrp - t.price;
+    $('#save-row').hidden = save <= 0;
+    $('#save').textContent = '−' + inr(save);
+    $('#total').textContent = inr(t.price);
+  }
+
+  // ---------- Drawer open/close ----------
+  let lastFocus = null, addedTimer = null;
+  function open(){
+    lastFocus = document.activeElement;
+    document.body.classList.add('cart-open');
+    $('#cart').setAttribute('aria-hidden','false');
+    setTimeout(() => $('#cart .icon-btn').focus(), 50);
+  }
+  function close(){
+    document.body.classList.remove('cart-open');
+    $('#cart').setAttribute('aria-hidden','true');
+    lastFocus && lastFocus.focus();
+  }
+  function flashAdded(text){
+    $('#added-text').textContent = text;
+    const el = $('#added'); el.classList.add('is-visible');
+    clearTimeout(addedTimer); addedTimer = setTimeout(() => el.classList.remove('is-visible'), 3500);
+  }
+
+  // ---------- Events ----------
+  $('#atc').addEventListener('click', () => {
+    const key = $('#packs input:checked').value;
+    add(key);
+    state.justUpgraded = false;
+    state.upsellDismissed = false; // every fresh Add to Cart shows the full offer again
+    track(key === 'p1' ? 'pack_add_to_cart' : 'pack2_add_to_cart', {event_category:'ecommerce',pack_selected:key.replace('p','pack_')});
+    render();
+    open();
+    flashAdded(`${PRODUCT} · ${VARIANTS[key].title} added to cart`);
+  });
+
+  document.addEventListener('click', e => {
+    const t = e.target.closest('button, .overlay'); if (!t) return;
+    if (t.matches('[data-close]')) return close();
+    if (t.dataset.inc) { const l = state.lines.find(x => x.key === t.dataset.inc); return setQty(l.key, l.qty+1); }
+    if (t.dataset.dec) { const l = state.lines.find(x => x.key === t.dataset.dec); return setQty(l.key, l.qty-1); }
+    if (t.dataset.remove) return setQty(t.dataset.remove, 0);
+    if (t.matches('[data-upgrade]')) return upgrade();
+    if (t.matches('[data-dismiss-upsell]')) {
+      state.upsellDismissed = true;
+      track('pack_add_to_cart',{event_category:'ecommerce',action:'declined_upsell',pack_selected:'pack_1',placement:'cart_drawer'});
+      return render();
+    }
+  });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && document.body.classList.contains('cart-open')) close(); });
+
+  render();
+})();
+</script>
+</body>
+</html>

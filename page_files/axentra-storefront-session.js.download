@@ -1,0 +1,186 @@
+/**
+ * Storefront OMC session — sync email via app proxy, clear on logout, notify subscribe iframe.
+ */
+(function () {
+  'use strict';
+  if (window.__AXENTRA_STOREFRONT_SESSION_LOADED) return;
+  window.__AXENTRA_STOREFRONT_SESSION_LOADED = true;
+
+  var SESSION_KEYS = [
+    'axentra_customer_id',
+    'axentra_shop',
+    'axentra_customer_email',
+    'axentra_customer_name',
+    'axentra_customer_phone',
+    'axentra_external_login_session',
+    'axentra_iframe_nonce',
+    'axentra_sso_paused',
+    'axentra_sso_reauth',
+  ];
+  var LOCAL_KEYS = [
+    'axentra_refresh_token',
+    'axentra_customer_id',
+    'axentra_customer_email',
+    'axentra_sso_v1',
+  ];
+
+  window.axentraClearStorefrontSession = function axentraClearStorefrontSession() {
+    SESSION_KEYS.forEach(function (k) {
+      try { sessionStorage.removeItem(k); } catch (e) {}
+    });
+    LOCAL_KEYS.forEach(function (k) {
+      try { localStorage.removeItem(k); } catch (e) {}
+    });
+
+    try {
+      window.axentra_customer_id = null;
+      window.customerId = null;
+      window.axentra_liquid_cid = null;
+      window.axentra_customer_email = null;
+      window.axentra_liquid_email = null;
+      window.profile_email = null;
+      window.customerEmail = null;
+      window.axentraSessionToken = null;
+      window.axentraSessionExpiresAt = null;
+      window.__axentraRefreshToken = null;
+      if (window.AxentraCustomer) {
+        window.AxentraCustomer.id = null;
+        window.AxentraCustomer.email = null;
+      }
+      if (window.myLoyaltyApp && window.myLoyaltyApp.customer) {
+        window.myLoyaltyApp.customer.id = null;
+        window.myLoyaltyApp.customer.email = null;
+        window.myLoyaltyApp.customer.isLoggedIn = false;
+      }
+    } catch (e) {}
+
+    if (typeof window.axentraResetPostLogoutAuthState === 'function') {
+      try {
+        window.axentraResetPostLogoutAuthState();
+      } catch (e) {}
+    }
+
+    try {
+      var iframe = document.getElementById('axentra-customer-subscription-iframe');
+      if (iframe && iframe.contentWindow) {
+        var shell = document.getElementById('axentra-customer-subscription-shell');
+        var nonce = shell ? shell.getAttribute('data-nonce') || '' : '';
+        iframe.contentWindow.postMessage(
+          { type: 'axentra_store_logout', nonce: nonce, storefront_has_omc_session: false },
+          '*',
+        );
+      }
+    } catch (e) {}
+
+    try {
+      window.dispatchEvent(new CustomEvent('axentra:logout-complete'));
+    } catch (e) {}
+  };
+
+  function persistFromProxyBody(body) {
+    if (!body || typeof body !== 'object') return;
+    var cid = body.customer_id != null ? String(body.customer_id) : '';
+    var email = body.email != null ? String(body.email) : '';
+    var shop = body.shop || (typeof Shopify !== 'undefined' ? Shopify.shop : '') || '';
+
+    if (cid) {
+      try {
+        sessionStorage.setItem('axentra_customer_id', cid);
+        localStorage.setItem('axentra_customer_id', cid);
+      } catch (e) {}
+      window.axentra_customer_id = cid;
+      window.customerId = cid;
+    }
+    if (email) {
+      try {
+        sessionStorage.setItem('axentra_customer_email', email);
+        localStorage.setItem('axentra_customer_email', email);
+      } catch (e) {}
+      window.axentra_customer_email = email;
+      window.profile_email = email;
+      window.customerEmail = email;
+    }
+    if (body.refresh_token) {
+      try {
+        localStorage.setItem('axentra_refresh_token', body.refresh_token);
+      } catch (e) {}
+      window.__axentraRefreshToken = body.refresh_token;
+    }
+    if (body.access_token) {
+      window.axentraSessionToken = body.access_token;
+      window.axentraSessionTokenType = body.token_type || 'Bearer';
+      if (body.expires_in) {
+        window.axentraSessionExpiresAt = Date.now() + Number(body.expires_in) * 1000;
+      }
+    }
+    if (typeof window.axentraSyncOmcSessionFromStorage === 'function') {
+      try { window.axentraSyncOmcSessionFromStorage(); } catch (e) {}
+    }
+  }
+
+  window.axentraRefreshStorefrontSessionFromProxy = function (refreshToken) {
+    refreshToken =
+      refreshToken ||
+      (function () {
+        try {
+          return localStorage.getItem('axentra_refresh_token') || window.__axentraRefreshToken;
+        } catch (e) {
+          return window.__axentraRefreshToken;
+        }
+      })();
+    if (!refreshToken) return Promise.resolve(null);
+    return fetch('/apps/ax/axentra_session/', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    })
+      .then(function (res) { return res.json().catch(function () { return {}; }); })
+      .then(function (body) {
+        if (body && body.access_token) persistFromProxyBody(body);
+        return body;
+      })
+      .catch(function () { return null; });
+  };
+
+  function patchThemeLogout() {
+    if (typeof window.Logout !== 'function' || window.Logout.__axClearWrapped) return;
+    var orig = window.Logout;
+    window.Logout = function () {
+      window.axentraClearStorefrontSession();
+      return orig.apply(this, arguments);
+    };
+    window.Logout.__axClearWrapped = true;
+  }
+
+  function patchFetchLogout() {
+    if (window.__axentraStorefrontFetchLogoutHook) return;
+    window.__axentraStorefrontFetchLogoutHook = true;
+    var orig = window.fetch;
+    if (typeof orig !== 'function') return;
+    window.fetch = function (input, init) {
+      var url = typeof input === 'string' ? input : (input && input.url) || '';
+      if (String(url).indexOf('/account/logout') !== -1) {
+        window.axentraClearStorefrontSession();
+      }
+      return orig.apply(this, arguments);
+    };
+  }
+
+  var wrapTimer = setInterval(patchThemeLogout, 400);
+  setTimeout(function () { clearInterval(wrapTimer); }, 120000);
+  patchFetchLogout();
+
+  window.addEventListener('message', function (e) {
+    var data = e.data;
+    if (!data || typeof data !== 'object') return;
+    if (data.type !== 'axentra_auth_success' && data.type !== 'axentra_omc_session_sync') return;
+    if (data.refresh_token) {
+      void window.axentraRefreshStorefrontSessionFromProxy(data.refresh_token);
+    }
+  });
+
+  if (typeof window.axentraSyncOmcSessionFromStorage === 'function') {
+    window.axentraSyncOmcSessionFromStorage();
+  }
+})();

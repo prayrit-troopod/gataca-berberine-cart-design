@@ -1,0 +1,198 @@
+(function () {
+  if (window.axentraLoadScript) return;
+
+  const TTL_MS = 36 * 60 * 60 * 1000;
+  const LS_PREFIX = 'axentra_asset_cache_';
+  const CACHE_VERSION = 2;
+  const LEGACY_COOKIE_PREFIX = 'axentra_asset_';
+
+  const pendingFetches = Object.create(null);
+  const pendingScriptLoads = Object.create(null);
+
+  function normalizeUrl(url) {
+    try {
+      const u = new URL(url, window.location.origin);
+      u.searchParams.delete('v');
+      return u.pathname + (u.search || '');
+    } catch {
+      return url.split('?')[0];
+    }
+  }
+
+  function assetKey(url) {
+    const normalized = normalizeUrl(url);
+    let h = 0;
+    for (let i = 0; i < normalized.length; i++) {
+      h = ((h << 5) - h + normalized.charCodeAt(i)) | 0;
+    }
+    return Math.abs(h).toString(36);
+  }
+
+  function getLegacyCookie(name) {
+    const match = document.cookie.match(
+      new RegExp('(?:^|; )' + name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '=([^;]*)')
+    );
+    return match ? decodeURIComponent(match[1]) : null;
+  }
+
+  function readCache(url) {
+    const key = assetKey(url);
+    const lsKey = LS_PREFIX + key;
+    try {
+      const raw = localStorage.getItem(lsKey);
+      if (!raw) return null;
+
+      if (raw.charAt(0) === '{') {
+        const entry = JSON.parse(raw);
+        if (
+          entry &&
+          entry.v === CACHE_VERSION &&
+          typeof entry.body === 'string' &&
+          typeof entry.exp === 'number' &&
+          entry.exp > Date.now()
+        ) {
+          return entry.body;
+        }
+        localStorage.removeItem(lsKey);
+        return null;
+      }
+
+      if (getLegacyCookie(LEGACY_COOKIE_PREFIX + key)) {
+        return raw;
+      }
+    } catch (e) {
+      try {
+        localStorage.removeItem(lsKey);
+      } catch (err) {
+        /* ignore */
+      }
+    }
+    return null;
+  }
+
+  function writeCache(url, content) {
+    const key = assetKey(url);
+    const lsKey = LS_PREFIX + key;
+    try {
+      const entry = {
+        v: CACHE_VERSION,
+        exp: Date.now() + TTL_MS,
+        body: content
+      };
+      localStorage.setItem(lsKey, JSON.stringify(entry));
+    } catch (e) {
+      /* storage full or blocked */
+    }
+  }
+
+  function injectScript(content, opts) {
+    const script = document.createElement('script');
+    script.textContent = content;
+    if (opts && opts.defer) script.defer = true;
+    (opts && opts.target === 'body' ? document.body : document.head).appendChild(script);
+    return script;
+  }
+
+  function fetchText(url, fetchOpts) {
+    const pendingKey = normalizeUrl(url);
+    if (pendingFetches[pendingKey]) return pendingFetches[pendingKey];
+
+    const promise = fetch(url, fetchOpts || { cache: 'no-store' })
+      .then(function (r) {
+        if (!r.ok) throw new Error('Failed to fetch ' + url + ': ' + r.status);
+        return r.text();
+      })
+      .finally(function () {
+        delete pendingFetches[pendingKey];
+      });
+
+    pendingFetches[pendingKey] = promise;
+    return promise;
+  }
+
+  window.axentraFetchCached = async function (url, fetchOpts) {
+    const cached = readCache(url);
+    if (cached) return cached;
+
+    const text = await fetchText(url, fetchOpts);
+    writeCache(url, text);
+    return text;
+  };
+
+  window.__axentraLoadedScriptUrls = window.__axentraLoadedScriptUrls || {};
+  window.__axentraLoadedCssUrls = window.__axentraLoadedCssUrls || {};
+
+  function markScriptLoaded(url) {
+    const key = normalizeUrl(url);
+    window.__axentraLoadedScriptUrls[key] = true;
+    window.__axentraLoadedScriptUrls[url] = true;
+  }
+
+  function isScriptLoaded(url) {
+    const key = normalizeUrl(url);
+    return !!(window.__axentraLoadedScriptUrls[key] || window.__axentraLoadedScriptUrls[url]);
+  }
+
+  window.axentraLoadScript = function (url, opts) {
+    opts = opts || {};
+    const loadKey = normalizeUrl(url);
+    if (isScriptLoaded(url)) return Promise.resolve();
+    if (pendingScriptLoads[loadKey]) return pendingScriptLoads[loadKey];
+
+    const cached = readCache(url);
+    if (cached) {
+      markScriptLoaded(url);
+      injectScript(cached, opts);
+      return Promise.resolve();
+    }
+
+    const promise = fetchText(url, { cache: 'no-store' })
+      .then(function (text) {
+        if (!isScriptLoaded(url)) {
+          writeCache(url, text);
+          markScriptLoaded(url);
+          injectScript(text, opts);
+        }
+      })
+      .finally(function () {
+        delete pendingScriptLoads[loadKey];
+      });
+
+    pendingScriptLoads[loadKey] = promise;
+    return promise;
+  };
+
+  window.axentraLoadCss = function (url, id) {
+    const loadKey = normalizeUrl(url);
+    if (window.__axentraLoadedCssUrls[loadKey]) {
+      if (id && !document.getElementById(id) && window.__axentraLoadedCssUrls[loadKey].el) {
+        window.__axentraLoadedCssUrls[loadKey].el.id = id;
+      }
+      return Promise.resolve();
+    }
+    if (id && document.getElementById(id)) {
+      window.__axentraLoadedCssUrls[loadKey] = { el: document.getElementById(id) };
+      return Promise.resolve();
+    }
+
+    const applyCss = function (text) {
+      const el = document.createElement('style');
+      if (id) el.id = id;
+      el.textContent = text;
+      document.head.appendChild(el);
+      window.__axentraLoadedCssUrls[loadKey] = { el: el };
+    };
+
+    const cached = readCache(url);
+    if (cached) {
+      applyCss(cached);
+      return Promise.resolve();
+    }
+
+    return fetchText(url, { cache: 'no-store' }).then(function (text) {
+      if (window.__axentraLoadedCssUrls[loadKey]) return;
+      writeCache(url, text);
+      applyCss(text);
+    });
+  };
+})();
